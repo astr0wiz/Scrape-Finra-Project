@@ -1,47 +1,37 @@
 ﻿using System;
 using System.Collections.Generic;
-using System.ComponentModel;
-using System.Data;
-using System.Drawing;
-using System.Linq;
-using System.Net;
-using System.Text;
-using System.Threading.Tasks;
 using System.Windows.Forms;
-using HtmlAgilityPack;
-using System.IO;
 using ScrapeFinra.Models;
 using Newtonsoft.Json;
-using Microsoft.Win32;
 using System.Text.RegularExpressions;
+using System.Diagnostics;
 
 namespace ScrapeFinra
 {
     public partial class MainForm : Form
     {
-        public WebBrowser browseList;
-        public WebBrowser browseDetails;
-        public Dictionary<string, int> States;
-        public int detailPtr;
-        public FinraDataSet fdset;
+        private WebBrowser c_browser;
+        private WebBrowser c_browserAPIs;
+        private Dictionary<string, int> c_States;
+        private int c_detailPtr;
+        private FinraDataSet c_fdset;
+        private string c_currentState;
+        private MatchCollection apiMatches;
 
         public MainForm()
         {
             InitializeComponent();
-            States = new Dictionary<string, int>();
-            States.Add("Tennessee", 48);
+            c_States = new Dictionary<string, int>();
+            c_States.Add("Tennessee", 48);
         }
 
         private void MainForm_Load(object sender, EventArgs e)
         {
-            SetFeatureBrowserEmulation();
-            browseList = new WebBrowser();
-            browseDetails = new WebBrowser();
-            browseList.ScriptErrorsSuppressed = true;
-            browseList.DocumentCompleted += browseList_NavFetchCompleted;
-            browseDetails.DocumentCompleted += browseDeatils_NavFetchCompleted;
+            c_browser = new WebBrowser();
+            c_browserAPIs = new WebBrowser();
+            c_browser.ScriptErrorsSuppressed = true;
             txtIssuer.Text = "Memphis";
-            foreach (string key in States.Keys)
+            foreach (string key in c_States.Keys)
             {
 
                 lstState.Items.Add(key);
@@ -51,116 +41,153 @@ namespace ScrapeFinra
             lstDAClass.SelectedIndex = 0;
             lstResults.SelectedIndex = 0;
             lstState.SelectedIndex = 0;
-            fdset = new FinraDataSet();
+            c_fdset = new FinraDataSet();
+            c_currentState = common.STATE_IDLE;
             LogIt("Initiated.");
         }
 
-        private void browseList_NavFetchCompleted(object sender, WebBrowserDocumentCompletedEventArgs e)
+        private void browser_NavCompleted(object sender, WebBrowserDocumentCompletedEventArgs e)
         {
-            if (browseList.DocumentText.Trim().Length > 0)
+            c_browser.DocumentCompleted -= browser_NavCompleted;
+            switch (c_currentState)
             {
-                browseList.DocumentCompleted -= browseList_NavFetchCompleted;
-                string oldName = string.Format("{{{0}:{{", lstResults.SelectedItem);
-                string newName = string.Format("{{\"{0}\":{{", lstResults.SelectedItem);
-                string jsonText = browseList.DocumentText.Replace(oldName, newName);
-                fdset = JsonConvert.DeserializeObject<FinraDataSet>(jsonText);
-                //System.Diagnostics.Debug.WriteLine(JsonConvert.SerializeObject(fdset, Formatting.Indented));
-                BuildDetails(fdset.finraData.Columns);
-            }
-            else
-            {
-                LogIt("Criteria returned no information!");
+                case common.STATE_LINKSET:
+                    if (c_browser.DocumentText.Trim().Length > 0)
+                    {
+                        //
+                        // The set of links (all bonds) comes back as JSON data.
+                        // Root object is code for the requested results ("B" = bonds)
+                        //
+                        string oldName = string.Format("{{{0}:{{", lstResults.SelectedItem);
+                        string newName = string.Format("{{\"{0}\":{{", lstResults.SelectedItem);
+                        string jsonText = c_browser.DocumentText.Replace(oldName, newName);
+                        try
+                        {
+                            c_fdset = JsonConvert.DeserializeObject<FinraDataSet>(jsonText);
+                            c_detailPtr = 0;
+                            if (c_fdset.finraData.Columns.Count > 0)
+                            {
+                                ProcessState(common.STATE_ITEM);
+                            }
+                        }
+                        catch (Newtonsoft.Json.JsonReaderException ex)
+                        {
+                            Trace.WriteLine(string.Format("-!Json Reader Error! : {0}", ex.Message));
+                        }
+                    }
+                    else
+                    {
+                        LogIt("Criteria returned no information!");
+                    }
+                    break;
+                case common.STATE_ITEM:
+                    Regex rx = new Regex(@"Finra_bond_detail_url[ ]*=[ ]*'(.*)';");
+                    Match match = rx.Match(c_browser.DocumentText);
+                    if (match.Success)
+                    {
+                        ProcessState(common.STATE_BASEAPI, new object[] { "http:" + match.Groups[1].Value });
+                    }
+                    else
+                    {
+                        LogIt("Item base not found!");
+                    }
+                    break;
+                default:
+                    LogIt(string.Format(" ** Invalid state: {0}! **", c_currentState));
+                    break;
             }
         }
 
-        private void browser_DetailsFetchCompleted(object sender, WebBrowserDocumentCompletedEventArgs e)
+        private void browserAPIs_NavCompleted(object sender, WebBrowserDocumentCompletedEventArgs e)
         {
-            Regex rx = new Regex(@"Finra_bond_detail_url[ ]*=[ ]*'(.*)';");
-            Match match = rx.Match(browseList.DocumentText);
-            if (match.Success)
+            //HtmlAgilityPack.HtmlDocument htmlDoc = new HtmlAgilityPack.HtmlDocument();
+            //htmlDoc.Load(browserAPIs.DocumentStream);
+            c_browserAPIs.DocumentCompleted -= browserAPIs_NavCompleted;
+            switch (c_currentState)
             {
-                browseDetails.Navigate("http:" + match.Groups[1].Value);
+                case common.STATE_BASEAPI:
+                    Regex rx = new Regex(@"\s*tempReqUrl\s*=\s*""(?<api>.*?quote/c-(banner|tax).*?callback=).*", RegexOptions.ExplicitCapture);
+                    if (rx.IsMatch(c_browserAPIs.DocumentText))
+                    {
+                        apiMatches = rx.Matches(c_browserAPIs.DocumentText);
+                        ProcessState(common.STATE_APIBANNER, new object[] { apiMatches[0].Groups["api"].Value });
+                    }
+                    break;
+                case common.STATE_APIBANNER:
+                    break;
+                case common.STATE_APITAX:
+                    break;
+                default:
+                    break;
             }
-            else
-            {
-                LogIt("Detail not found!");
-            }
-        }
-
-        private void browseDeatils_NavFetchCompleted(object sender, WebBrowserDocumentCompletedEventArgs e)
-        {
-            HtmlAgilityPack.HtmlDocument htmlDoc = new HtmlAgilityPack.HtmlDocument();
-            htmlDoc.Load(browseDetails.DocumentStream);
-            LogIt("Scraping...");
-            htmlDoc.
-        }
-
-        private string GetHomeURL()
-        {
-            StringBuilder url = new StringBuilder();
-            url.Append("http://finra-markets.morningstar.com/bondSearch.jsp");
-            url.Append(string.Format("?count={0}", udNumReturned.Value));
-            url.Append(string.Format("&searchtype={0}", lstResults.SelectedItem));
-            url.Append("&sortfield=issuerName");
-            url.Append("&sorttype=1");
-            url.Append("&start=0");
-            url.Append("&curPage=1&query=");
-            url.Append(WebUtility.UrlEncode(string.Format("{{\"Keywords\":[{{\"Name\":\"debtOrAssetClass\",\"Value\":\"{0}\"}},", lstDAClass.SelectedItem)));
-            url.Append(WebUtility.UrlEncode(string.Format("{{\"Name\":\"showResultsAs\",\"Value\":\"{0}\"}},", lstResults.SelectedItem)));
-            url.Append(WebUtility.UrlEncode(string.Format("{{\"Name\":\"state\",\"Value\":\"{0}\"}},", States[lstState.SelectedItem.ToString()])));
-            url.Append(WebUtility.UrlEncode(string.Format("{{\"Name\":\"issuerName\",\"Value\":\"{0}\"}}]}}", txtIssuer.Text)));
-            return (url.ToString());
-            //return ("http://finra-markets.morningstar.com/bondSearch.jsp?count=2&searchtype=B&query=%7B%22Keywords%22%3A%5B%7B%22Name%22%3A%22debtOrAssetClass%22%2C%22Value%22%3A%224%22%7D%2C%7B%22Name%22%3A%22showResultsAs%22%2C%22Value%22%3A%22B%22%7D%2C%7B%22Name%22%3A%22state%22%2C%22Value%22%3A%2248%22%7D%2C%7B%22Name%22%3A%22issuerName%22%2C%22Value%22%3A%22Memphis%22%7D%5D%7D&sortfield=issuerName&sorttype=1&start=0&curPage=1");
-            //return ("http://finra-markets.morningstar.com/bondSearch.jsp?count=800&searchtype=B&sortfield=issuerName&sorttype=1&start=0&curPage=1&query%3D%7B%22Keywords%22%3A%5B%7B%22Name%22%3A%22debtOrAssetClass%22%2C%22Value%22%3A%224%22%7D%2C%7B%22Name%22%3A%22showResultsAs%22%2C%22Value%22%3A%22B%22%7D%2C%7B%22Name%22%3A%22state%22%2C%22Value%22%3A%2248%22%7D%2C%7B%22Name%22%3A%22issuerName%22%2C%22Value%22%3A%22Memphis%22%7D%5D%7D");
 
         }
 
-        private void MainForm_FormClosing(object sender, FormClosingEventArgs e)
+        private void ScheduleDetailScrapers(MatchCollection APIcalls)
         {
-            if (browseList.IsBusy)
-            {
-                browseList.Stop();
-            }
+            throw new NotImplementedException();
         }
 
         private void btnGetData_Click(object sender, EventArgs e)
         {
-            browseList.Navigate(GetHomeURL());
-            LogIt("Retrieving list...");
+            ProcessState(common.STATE_LINKSET);
         }
 
-        private void BuildDetails(List<Bond> bonds)
+        private void MainForm_FormClosing(object sender, FormClosingEventArgs e)
         {
-            browseList.DocumentCompleted += browser_DetailsFetchCompleted;
-            if (bonds.Count > 0)
+            if (c_browser.IsBusy)
             {
-                detailPtr = 0;
-                FetchDetail(detailPtr, bonds[detailPtr]);
+                c_browser.Stop();
             }
         }
 
-        private void FetchDetail(int ptr,Bond bond)
+        private void ProcessState(string appState, object[] args = null)
         {
-            string url = "http://finra-markets.morningstar.com/BondCenter/BondDetail.jsp?ticker={0}&symbol={1}";
-            browseList.Navigate(string.Format(url, bond.securityId, bond.symbol));
-            LogIt(string.Format("Fetching detail {0} of {1}   [{2}]", ptr, fdset.finraData.Rows, fdset.finraData.Columns[ptr].securityId));
+            c_currentState = appState;
+            switch (appState)
+            {
+                case common.STATE_LINKSET:
+                    c_browser.DocumentCompleted += browser_NavCompleted;
+                    c_browser.Navigate(Utilities.GetListURL(new object[]{
+                        udNumReturned.Value,
+                        lstResults.SelectedItem,
+                        lstDAClass.SelectedItem,
+                        c_States[lstState.SelectedItem.ToString()],
+                        txtIssuer.Text
+                    }));
+                    LogIt("Retrieving list...");
+                    break;
+                case common.STATE_ITEM:
+                    c_browser.DocumentCompleted += browser_NavCompleted;
+                    string url = "http://finra-markets.morningstar.com/BondCenter/BondDetail.jsp?ticker={0}&symbol={1}";
+                    c_browser.Navigate(string.Format(url, c_fdset.finraData.Columns[c_detailPtr].securityId, c_fdset.finraData.Columns[c_detailPtr].symbol));
+                    LogIt(string.Format("Fetching detail {0} of {1}   [{2}]", c_detailPtr, c_fdset.finraData.Rows, c_fdset.finraData.Columns[c_detailPtr].securityId));
+                    break;
+                case common.STATE_BASEAPI:
+                    c_browserAPIs.DocumentCompleted += browserAPIs_NavCompleted;
+                    c_browserAPIs.Navigate(args[0].ToString());
+                    LogIt("Getting data...", false);
+                    break;
+                case common.STATE_APIBANNER:
+                    c_browserAPIs.DocumentCompleted += browserAPIs_NavCompleted;
+                    c_browserAPIs.Navigate("http:" + args[0].ToString());
+                    LogIt("...banner...", false);
+                    break;
+                case common.STATE_APITAX:
+                    c_browserAPIs.DocumentCompleted += browserAPIs_NavCompleted;
+                    c_browserAPIs.Navigate("http:" + args[0].ToString());
+                    LogIt("...taxes...", true);
+                    break;
+                default:
+                    // STATE_IDLE
+                    break;
+            }
         }
 
-        // enable HTML5 (assuming we're running IE10+)
-        // more info: http://stackoverflow.com/a/18333982/1768303
-        static void SetFeatureBrowserEmulation()
-        {
-            if (LicenseManager.UsageMode != LicenseUsageMode.Runtime)
-                return;
-            var appName = System.IO.Path.GetFileName(System.Diagnostics.Process.GetCurrentProcess().MainModule.FileName);
-            Registry.SetValue(@"HKEY_CURRENT_USER\Software\Microsoft\Internet Explorer\Main\FeatureControl\FEATURE_BROWSER_EMULATION",
-                appName, 10000, RegistryValueKind.DWord);
-        }
 
-
-        private void LogIt(string message)
+        private void LogIt(string message, bool hasNewLine = true)
         {
-            txtLog.Text += message + Environment.NewLine;
+            txtLog.Text += message + (hasNewLine ? Environment.NewLine : "");
         }
 
     }
