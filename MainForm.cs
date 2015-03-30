@@ -17,6 +17,7 @@ namespace ScrapeFinra
         private FinraDataSet c_fdset;
         private string c_currentState;
         private MatchCollection apiMatches;
+        private List<FinraReportItem> c_reportItems;
 
         public MainForm()
         {
@@ -48,6 +49,7 @@ namespace ScrapeFinra
 
         private void browser_NavCompleted(object sender, WebBrowserDocumentCompletedEventArgs e)
         {
+            Regex rx;
             c_browser.DocumentCompleted -= browser_NavCompleted;
             switch (c_currentState)
             {
@@ -64,6 +66,7 @@ namespace ScrapeFinra
                         try
                         {
                             c_fdset = JsonConvert.DeserializeObject<FinraDataSet>(jsonText);
+                            c_reportItems = new List<FinraReportItem>();
                             c_detailPtr = 0;
                             if (c_fdset.finraData.Columns.Count > 0)
                             {
@@ -81,10 +84,11 @@ namespace ScrapeFinra
                     }
                     break;
                 case common.STATE_ITEM:
-                    Regex rx = new Regex(@"Finra_bond_detail_url[ ]*=[ ]*'(.*)';");
+                    rx = new Regex(@"Finra_bond_detail_url[ ]*=[ ]*'(.*)';");
                     Match match = rx.Match(c_browser.DocumentText);
                     if (match.Success)
                     {
+                        c_reportItems.Add(new FinraReportItem(c_fdset.finraData.Columns[c_detailPtr].descriptionOfIssuer));
                         ProcessState(common.STATE_BASEAPI, new object[] { "http:" + match.Groups[1].Value });
                     }
                     else
@@ -92,7 +96,15 @@ namespace ScrapeFinra
                         LogIt("Item base not found!");
                     }
                     break;
-                default:
+                 case common.STATE_BASEAPI:
+                    rx = new Regex(@"\s*tempReqUrl\s*=\s*""(?<api>.*?quote/c-(banner|tax).*?callback=).*", RegexOptions.ExplicitCapture);
+                    if (rx.IsMatch(c_browser.DocumentText))
+                    {
+                        apiMatches = rx.Matches(c_browser.DocumentText);
+                        ProcessState(common.STATE_APIBANNER, new object[] { apiMatches[0].Groups["api"].Value });
+                    }
+                    break;
+               default:
                     LogIt(string.Format(" ** Invalid state: {0}! **", c_currentState));
                     break;
             }
@@ -100,32 +112,41 @@ namespace ScrapeFinra
 
         private void browserAPIs_NavCompleted(object sender, WebBrowserDocumentCompletedEventArgs e)
         {
-            //HtmlAgilityPack.HtmlDocument htmlDoc = new HtmlAgilityPack.HtmlDocument();
-            //htmlDoc.Load(browserAPIs.DocumentStream);
             c_browserAPIs.DocumentCompleted -= browserAPIs_NavCompleted;
             switch (c_currentState)
             {
-                case common.STATE_BASEAPI:
-                    Regex rx = new Regex(@"\s*tempReqUrl\s*=\s*""(?<api>.*?quote/c-(banner|tax).*?callback=).*", RegexOptions.ExplicitCapture);
-                    if (rx.IsMatch(c_browserAPIs.DocumentText))
-                    {
-                        apiMatches = rx.Matches(c_browserAPIs.DocumentText);
-                        ProcessState(common.STATE_APIBANNER, new object[] { apiMatches[0].Groups["api"].Value });
-                    }
-                    break;
                 case common.STATE_APIBANNER:
+                    ScrapeDetails(c_browserAPIs.DocumentText);
                     break;
                 case common.STATE_APITAX:
                     break;
                 default:
                     break;
             }
-
         }
 
-        private void ScheduleDetailScrapers(MatchCollection APIcalls)
+        private void ScrapeDetails(string documentText)
         {
-            throw new NotImplementedException();
+            if (documentText != null)
+            {
+                HtmlAgilityPack.HtmlDocument htmlDoc = new HtmlAgilityPack.HtmlDocument();
+                Trace.WriteLine(documentText);
+                htmlDoc.LoadHtml(documentText);
+                switch (c_currentState)
+                {
+                    case common.STATE_APIBANNER:
+                        HtmlAgilityPack.HtmlNode reportlink = htmlDoc.DocumentNode.SelectSingleNode("//a[@id='report_link'");
+                        break;
+                    case common.STATE_APITAX:
+                        break;
+                    default:
+                        break;
+                }
+            }
+            else
+            {
+                LogIt(string.Format("-! No details fetched for {0} !-", c_currentState));
+            }
         }
 
         private void btnGetData_Click(object sender, EventArgs e)
@@ -164,8 +185,9 @@ namespace ScrapeFinra
                     LogIt(string.Format("Fetching detail {0} of {1}   [{2}]", c_detailPtr, c_fdset.finraData.Rows, c_fdset.finraData.Columns[c_detailPtr].securityId));
                     break;
                 case common.STATE_BASEAPI:
-                    c_browserAPIs.DocumentCompleted += browserAPIs_NavCompleted;
-                    c_browserAPIs.Navigate(args[0].ToString());
+                    c_browser.Stop();
+                    c_browser.DocumentCompleted += browser_NavCompleted;
+                    c_browser.Navigate(args[0].ToString());
                     LogIt("Getting data...", false);
                     break;
                 case common.STATE_APIBANNER:

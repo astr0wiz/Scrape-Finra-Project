@@ -1,5 +1,7 @@
-﻿using System.Net;
+﻿using System.Diagnostics;
+using System.Net;
 using System.Text;
+using System.Text.RegularExpressions;
 
 namespace ScrapeFinra
 {
@@ -23,5 +25,22 @@ namespace ScrapeFinra
 
         }
 
+        public static string CleanJsonifiedHtml(string jsonValue)
+        {
+            string retval = "";
+            Regex rx = new Regex(@"<!DOCTYPE.*?>");
+            Regex rxBody = new Regex(@"<body.*body>", RegexOptions.Singleline);
+            Regex rxStyle = new Regex(@"<style.*?style>", RegexOptions.Singleline);
+            Regex rxHead = new Regex(@"<head.*?head>", RegexOptions.Singleline);
+            if (rx.IsMatch(jsonValue))
+            {
+                retval = rx.Replace(jsonValue, "");
+                retval = rxBody.Replace(retval, "<body></body>");
+                retval = rxStyle.Replace(retval, "");
+                retval = rxHead.Replace(retval, "");
+                Trace.WriteLine("NO DOCTYPE OR BODY OR HEAD OR STYLE: " + retval);
+            }
+            return retval;
+        }
     }
 }

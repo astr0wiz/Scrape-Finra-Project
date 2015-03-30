@@ -5,6 +5,6 @@ namespace ScrapeFinra.Models
     class APIData
     {
         [JsonProperty("html")]
-        string html { get; set; }
+        public string html { get; set; }
     }
 }

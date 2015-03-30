@@ -20,4 +20,48 @@ namespace ScrapeFinra.Models
         public FinraData finraData;
     }
 
+    class FinraReportItem
+    {
+        public string CUSIP { get; set; }
+        public string Description { get; set; }
+        public string Coupon { get; set; }
+        public string MaturityDate { get; set; }
+        public string LastPrice { get; set; }
+        public string NextCallDate { get; set; }
+        public bool Taxable { get; set; }
+        public bool BankQualified { get; set; }
+
+        public FinraReportItem()
+        {
+            CUSIP = "";
+            Description = "";
+            Coupon = "";
+            MaturityDate = "";
+            LastPrice = "";
+            NextCallDate = "";
+            Taxable = false;
+            BankQualified = false;
+        }
+
+        public FinraReportItem(string description)
+        {
+            CUSIP = "";
+            Description = description;
+            Coupon = "";
+            MaturityDate = "";
+            LastPrice = "";
+            NextCallDate = "";
+            Taxable = false;
+            BankQualified = false;
+        }
+    }
+
+    class FinraStatistics
+    {
+        public int FederallyTaxableCount { get; set; }
+        public int BankQualifiedCount { get; set; }
+        public int BondCountBelow100 { get; set; }
+        public int BondCountCouponOver5 { get; set; }
+    }
+
 }
