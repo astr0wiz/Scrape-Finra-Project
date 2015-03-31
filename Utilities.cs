@@ -66,13 +66,13 @@ namespace ScrapeFinra
 
         public static bool ScrapeMaturityDate(string maturityDate, FinraReportItem rptItem)
         {
-            rptItem.MaturityDate = maturityDate;
+            rptItem.MaturityDate = maturityDate.ToLower().Equals("&mdash;") ? "" : maturityDate;
             return true;
         }
 
         public static bool ScrapeNextCallDate(string calldate, FinraReportItem rptItem)
         {
-            rptItem.NextCallDate = calldate;
+            rptItem.NextCallDate = calldate.ToLower().Equals("&mdash;") ? "" : calldate;
             return true;
         }
 
@@ -82,9 +82,9 @@ namespace ScrapeFinra
             return true;
         }
 
-        public static bool ScrapeTaxable(string taxable, FinraReportItem rptItem)
+        public static bool ScrapeOriginalOffering(string originaloffering, FinraReportItem rptItem)
         {
-            rptItem.Taxable = taxable.Equals("yes", System.StringComparison.CurrentCultureIgnoreCase) ? true : false;
+            rptItem.OriginalOffering = originaloffering;
             return true;
         }
 
@@ -94,7 +94,10 @@ namespace ScrapeFinra
             return true;
         }
 
-
-
+        public static bool ScrapeTaxableFederal(string taxablefederal, FinraReportItem rptItem)
+        {
+            rptItem.Taxable = taxablefederal.Equals("yes", System.StringComparison.CurrentCultureIgnoreCase) ? true : false;
+            return true;
+        }
     }
 }

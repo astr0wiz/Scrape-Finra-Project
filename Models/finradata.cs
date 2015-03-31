@@ -30,6 +30,7 @@ namespace ScrapeFinra.Models
         public string NextCallDate { get; set; }
         public bool Taxable { get; set; }
         public bool BankQualified { get; set; }
+        public string OriginalOffering { get; set; }
 
         public FinraReportItem()
         {
@@ -41,6 +42,7 @@ namespace ScrapeFinra.Models
             NextCallDate = "";
             Taxable = false;
             BankQualified = false;
+            OriginalOffering = "";
         }
 
         public FinraReportItem(string description)
@@ -53,6 +55,7 @@ namespace ScrapeFinra.Models
             NextCallDate = "";
             Taxable = false;
             BankQualified = false;
+            OriginalOffering = "";
         }
     }
 
@@ -62,6 +65,14 @@ namespace ScrapeFinra.Models
         public int BankQualifiedCount { get; set; }
         public int BondCountBelow100 { get; set; }
         public int BondCountCouponOver5 { get; set; }
+
+        public FinraStatistics()
+        {
+            FederallyTaxableCount = 0;
+            BankQualifiedCount = 0;
+            BondCountBelow100 = 0;
+            BondCountCouponOver5 = 0;
+        }
     }
 
 }
