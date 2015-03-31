@@ -5,19 +5,22 @@ using ScrapeFinra.Models;
 using Newtonsoft.Json;
 using System.Text.RegularExpressions;
 using System.Diagnostics;
+using System.Net;
+using System.IO;
 
 namespace ScrapeFinra
 {
     public partial class MainForm : Form
     {
         private WebBrowser c_browser;
-        private WebBrowser c_browserAPIs;
+        private WebRequest c_requestAPIs;
         private Dictionary<string, int> c_States;
         private int c_detailPtr;
         private FinraDataSet c_fdset;
         private string c_currentState;
-        private MatchCollection apiMatches;
+        private MatchCollection c_apiMatches;
         private List<FinraReportItem> c_reportItems;
+        private FinraReportItem c_rptItem;
 
         public MainForm()
         {
@@ -29,7 +32,6 @@ namespace ScrapeFinra
         private void MainForm_Load(object sender, EventArgs e)
         {
             c_browser = new WebBrowser();
-            c_browserAPIs = new WebBrowser();
             c_browser.ScriptErrorsSuppressed = true;
             txtIssuer.Text = "Memphis";
             foreach (string key in c_States.Keys)
@@ -88,7 +90,7 @@ namespace ScrapeFinra
                     Match match = rx.Match(c_browser.DocumentText);
                     if (match.Success)
                     {
-                        c_reportItems.Add(new FinraReportItem(c_fdset.finraData.Columns[c_detailPtr].descriptionOfIssuer));
+                        c_rptItem = new FinraReportItem(c_fdset.finraData.Columns[c_detailPtr].descriptionOfIssuer);
                         ProcessState(common.STATE_BASEAPI, new object[] { "http:" + match.Groups[1].Value });
                     }
                     else
@@ -96,48 +98,87 @@ namespace ScrapeFinra
                         LogIt("Item base not found!");
                     }
                     break;
-                 case common.STATE_BASEAPI:
+                case common.STATE_BASEAPI:
                     rx = new Regex(@"\s*tempReqUrl\s*=\s*""(?<api>.*?quote/c-(banner|tax).*?callback=).*", RegexOptions.ExplicitCapture);
                     if (rx.IsMatch(c_browser.DocumentText))
                     {
-                        apiMatches = rx.Matches(c_browser.DocumentText);
-                        ProcessState(common.STATE_APIBANNER, new object[] { apiMatches[0].Groups["api"].Value });
+                        c_apiMatches = rx.Matches(c_browser.DocumentText);
+                        ProcessState(common.STATE_APIBANNER, new object[] { c_apiMatches[0].Groups["api"].Value });
                     }
                     break;
-               default:
+                default:
                     LogIt(string.Format(" ** Invalid state: {0}! **", c_currentState));
                     break;
             }
         }
 
-        private void browserAPIs_NavCompleted(object sender, WebBrowserDocumentCompletedEventArgs e)
+        private string GetAPIData(string uri)
         {
-            c_browserAPIs.DocumentCompleted -= browserAPIs_NavCompleted;
-            switch (c_currentState)
+            c_requestAPIs = WebRequest.Create("http:" + uri);
+            c_requestAPIs.Method = "GET";
+            WebResponse _response = c_requestAPIs.GetResponse();
+            if (((HttpWebResponse)_response).StatusCode == HttpStatusCode.OK)
             {
-                case common.STATE_APIBANNER:
-                    ScrapeDetails(c_browserAPIs.DocumentText);
-                    break;
-                case common.STATE_APITAX:
-                    break;
-                default:
-                    break;
+                using (Stream _datastream = _response.GetResponseStream())
+                {
+                    using (StreamReader _datareader = new StreamReader(_datastream))
+                    {
+                        APIData _apiData = JsonConvert.DeserializeObject<APIData>(_datareader.ReadToEnd());
+                        return _apiData.html;
+                    }
+                }
+            }
+            else
+            {
+                LogIt("-! Bad response from API call: " + ((HttpWebResponse)_response).StatusCode.ToString());
+                return "";
             }
         }
 
         private void ScrapeDetails(string documentText)
         {
+            HtmlAgilityPack.HtmlNodeCollection nodes;
             if (documentText != null)
             {
                 HtmlAgilityPack.HtmlDocument htmlDoc = new HtmlAgilityPack.HtmlDocument();
-                Trace.WriteLine(documentText);
-                htmlDoc.LoadHtml(documentText);
+                htmlDoc.LoadHtml(Utilities.WrapPartialHtml(documentText));
+
+                Trace.WriteLine(Utilities.WrapPartialHtml(documentText));
+
                 switch (c_currentState)
                 {
                     case common.STATE_APIBANNER:
-                        HtmlAgilityPack.HtmlNode reportlink = htmlDoc.DocumentNode.SelectSingleNode("//a[@id='report_link'");
+                        string reportlink = htmlDoc.DocumentNode.SelectSingleNode("//a[@id='report_link']").Attributes["href"].Value;
+                        if (!Utilities.ScrapeCUSIP(reportlink, c_rptItem))
+                        {
+                            LogIt("-! Warning: CUSIP not found");
+                        }
+                        nodes = htmlDoc.DocumentNode.SelectNodes("//div[@id='market_wrapper']/div/div[@class='gr_text_bigprice']");
+                        if (!Utilities.ScrapeCouponRate(nodes[0].InnerHtml.Trim(), c_rptItem))
+                        {
+                            LogIt("-! Warning: Coupon Rate not found");
+                        }
+                        if (!Utilities.ScrapeMaturityDate(nodes[1].InnerHtml.Trim(), c_rptItem))
+                        {
+                            LogIt("-! Warning: Maturity Date not found");
+                        }
+                        nodes = htmlDoc.DocumentNode.SelectNodes("//div[@class='gr_colm_a2b gr_text1']/table/tbody/tr/td/span");
+                        if (!Utilities.ScrapeNextCallDate(nodes[1].InnerHtml.Trim(), c_rptItem))
+                        {
+                            LogIt("-! Warning: Next Call Date not found");
+                        }
+                        if (!Utilities.ScrapeLastTradePrice(nodes[3].InnerHtml.Trim(), c_rptItem))
+                        {
+                            LogIt("-! Warning: Next Call Date not found");
+                        }
+
+                        ProcessState(common.STATE_APITAX, new object[] { c_apiMatches[1].Groups["api"].Value });
                         break;
                     case common.STATE_APITAX:
+                        // get nodes
+                        // scrape taxable
+                        // scrape bankqualified
+                        // process state STATE_STORE (here we store in the list and add to the totals)
                         break;
                     default:
                         break;
@@ -145,7 +186,7 @@ namespace ScrapeFinra
             }
             else
             {
-                LogIt(string.Format("-! No details fetched for {0} !-", c_currentState));
+                LogIt(string.Format("-! No details fetched for {0}", c_currentState));
             }
         }
 
@@ -185,20 +226,23 @@ namespace ScrapeFinra
                     LogIt(string.Format("Fetching detail {0} of {1}   [{2}]", c_detailPtr, c_fdset.finraData.Rows, c_fdset.finraData.Columns[c_detailPtr].securityId));
                     break;
                 case common.STATE_BASEAPI:
-                    c_browser.Stop();
                     c_browser.DocumentCompleted += browser_NavCompleted;
                     c_browser.Navigate(args[0].ToString());
                     LogIt("Getting data...", false);
                     break;
                 case common.STATE_APIBANNER:
-                    c_browserAPIs.DocumentCompleted += browserAPIs_NavCompleted;
-                    c_browserAPIs.Navigate("http:" + args[0].ToString());
                     LogIt("...banner...", false);
+                    ScrapeDetails(GetAPIData(args[0].ToString()));
                     break;
                 case common.STATE_APITAX:
-                    c_browserAPIs.DocumentCompleted += browserAPIs_NavCompleted;
-                    c_browserAPIs.Navigate("http:" + args[0].ToString());
                     LogIt("...taxes...", true);
+                    ScrapeDetails(GetAPIData(args[0].ToString()));
+                    break;
+                case common.STATE_STORE:
+                    // put the rptItem into reportList
+                    // call incrementer for requested summaries
+                    // add 1 to c_detailPtr
+                    // call reset func to drop and create WebBrowser control, and call process state [gotta figure out how to do that async -- maybe Invoke?]
                     break;
                 default:
                     // STATE_IDLE

@@ -14,5 +14,6 @@ namespace ScrapeFinra
         public const string STATE_BASEAPI = "BAPI";
         public const string STATE_APIBANNER = "ABNR";
         public const string STATE_APITAX = "ATAX";
+        public const string STATE_STORE = "STORE";
     }
 }

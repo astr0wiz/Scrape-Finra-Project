@@ -1,4 +1,5 @@
-﻿using System.Diagnostics;
+﻿using ScrapeFinra.Models;
+using System.Diagnostics;
 using System.Net;
 using System.Text;
 using System.Text.RegularExpressions;
@@ -25,22 +26,75 @@ namespace ScrapeFinra
 
         }
 
-        public static string CleanJsonifiedHtml(string jsonValue)
+        public static string WrapPartialHtml(string partialHtml)
         {
-            string retval = "";
-            Regex rx = new Regex(@"<!DOCTYPE.*?>");
-            Regex rxBody = new Regex(@"<body.*body>", RegexOptions.Singleline);
-            Regex rxStyle = new Regex(@"<style.*?style>", RegexOptions.Singleline);
-            Regex rxHead = new Regex(@"<head.*?head>", RegexOptions.Singleline);
-            if (rx.IsMatch(jsonValue))
+            StringBuilder newHtml = new StringBuilder();
+            newHtml.Append(partialHtml);
+            if (!partialHtml.ToLower().Contains("<body"))
             {
-                retval = rx.Replace(jsonValue, "");
-                retval = rxBody.Replace(retval, "<body></body>");
-                retval = rxStyle.Replace(retval, "");
-                retval = rxHead.Replace(retval, "");
-                Trace.WriteLine("NO DOCTYPE OR BODY OR HEAD OR STYLE: " + retval);
+                newHtml.Insert(0, "<body>");
+                newHtml.Append("</body>");
             }
-            return retval;
+            if (!partialHtml.ToLower().Contains("<html"))
+            {
+                newHtml.Insert(0, "<html>");
+                newHtml.Append("</html>");
+            }
+            return newHtml.ToString();
         }
+
+        public static bool ScrapeCUSIP(string reportlink, FinraReportItem rptItem)
+        {
+            Regex rx = new Regex(@".*cusip=(.{9})");
+            if (rx.IsMatch(reportlink))
+            {
+                Match match = rx.Match(reportlink);
+                rptItem.CUSIP = match.Groups[1].Value;
+                return true;
+            }
+            else
+            {
+                return false;
+            }
+        }
+
+        public static bool ScrapeCouponRate(string coupon, FinraReportItem rptItem)
+        {
+            rptItem.Coupon = coupon;
+            return true;
+        }
+
+        public static bool ScrapeMaturityDate(string maturityDate, FinraReportItem rptItem)
+        {
+            rptItem.MaturityDate = maturityDate;
+            return true;
+        }
+
+        public static bool ScrapeNextCallDate(string calldate, FinraReportItem rptItem)
+        {
+            rptItem.NextCallDate = calldate;
+            return true;
+        }
+
+        public static bool ScrapeLastTradePrice(string tradeprice, FinraReportItem rptItem)
+        {
+            rptItem.LastPrice = tradeprice;
+            return true;
+        }
+
+        public static bool ScrapeTaxable(string taxable, FinraReportItem rptItem)
+        {
+            rptItem.Taxable = taxable.Equals("yes", System.StringComparison.CurrentCultureIgnoreCase) ? true : false;
+            return true;
+        }
+
+        public static bool ScrapeBankQualified(string bankqualified, FinraReportItem rptItem)
+        {
+            rptItem.BankQualified = bankqualified.Equals("yes", System.StringComparison.CurrentCultureIgnoreCase) ? true : false;
+            return true;
+        }
+
+
+
     }
 }
